@@ -45,6 +45,17 @@ module Kafo
         puts "No answer file at #{@answer_file} found, can not continue"
         KafoConfigure.exit(:no_answer_file)
       end
+      template = ERB.new(@answers.to_yaml);
+      begin
+        @data = template.result(binding)
+        while /<%=.*%>/.match(@data) != nil
+          @data = ERB.new(@data).result(binding)
+        end
+      rescue NoMethodError
+        puts "Error rendering ERB in #{@answer_file}, use @answers hash to reference other answers."
+        KafoConfigure.exit(:invalid_values)
+      end
+      @data = YAML::load(@data)
 
       @config_dir = File.dirname(@config_file)
     end
@@ -197,10 +208,11 @@ EOS
     end
 
     def store(data, file = nil)
+      save_data = replace_with_erb(@answers, data)
       filename = file || answer_file
       FileUtils.touch filename
       File.chmod 0600, filename
-      File.open(filename, 'w') { |file| file.write(config_header + format(YAML.dump(data))) }
+      File.open(filename, 'w') { |file| file.write(config_header + format(YAML.dump(save_data))) }
     end
 
     def params
@@ -293,6 +305,19 @@ EOS
     end
 
     private
+
+    def replace_with_erb(erb_hash, rendered_hash)
+      erb_hash.zip(rendered_hash).each do |erb_answers,rendered_answers|
+        if erb_answers.is_a?(Hash) || erb_answers.is_a?(Array)
+          replace_with_erb(erb_answers, rendered_answers)
+        else
+          if /<%=.*%>/.match(erb_answers.to_s)
+            rendered_answers.replace erb_answers
+          end
+        end
+      end
+      rendered_hash #This now contains ERB content
+    end
 
     def custom_storage
       app[:custom]
